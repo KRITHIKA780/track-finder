@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { RotateCcw, Layout, Zap, Info, Trophy, Fingerprint, MousePointer2, Play, UserCircle2, Sparkles, Target, Activity, Rocket } from 'lucide-react';
-import { BFS, DFS, AStar } from './algorithms/pathfinding';
+import { BFS, DFS } from './algorithms/pathfinding';
 
 const ROWS = 20;
 const COLS = 40;
+const VISIBLE_RADIUS = 3;
 
 const CHARACTERS = [
   { id: 'pikachu', name: 'Pikachu', img: '/pikachu.png', color: '#facc15' },
@@ -23,7 +24,8 @@ const App = () => {
   const [endPos, setEndPos] = useState({ row: 0, col: 0 });
   const [gameWon, setGameWon] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [algorithm, setAlgorithm] = useState('A*');
+  const [algorithm, setAlgorithm] = useState('BFS');
+  const [level, setLevel] = useState(1);
   const [selectedChar, setSelectedChar] = useState(CHARACTERS[0]);
   const [showCharSelect, setShowCharSelect] = useState(true);
   const [mouseIsPressed, setMouseIsPressed] = useState(false);
@@ -42,18 +44,16 @@ const App = () => {
     distance: Infinity,
     isVisited: false,
     isRevealed: false,
+    isExplored: false,
     previousNode: null,
   });
 
   const resetVisualizationOnly = () => {
-    const nodes = document.querySelectorAll('.node-unique');
-    nodes.forEach(n => {
-      const classes = ['n-wall', 'n-start', 'n-target', 'n-player'];
-      const hasGameClass = classes.some(cls => n.classList.contains(cls));
-      if (!hasGameClass) {
-        n.classList.remove('node-path-active');
-      }
-    });
+    setGrid(prev => prev.map(row => row.map(node => ({
+      ...node,
+      isVisited: false,
+      isExplored: false
+    }))));
   };
 
   const revealCells = useCallback((row, col) => {
@@ -62,7 +62,7 @@ const App = () => {
       let changed = false;
       const next = prev.map(r => r.map(node => {
         const dist = Math.abs(node.row - row) + Math.abs(node.col - col);
-        if (dist <= visibleRadius && !node.isRevealed) {
+        if (dist <= VISIBLE_RADIUS && !node.isRevealed) {
           changed = true;
           return { ...node, isRevealed: true };
         }
@@ -70,41 +70,51 @@ const App = () => {
       }));
       return changed ? next : prev;
     });
-  }, [visibleRadius]);
+  }, []);
 
-  const generateNewGame = useCallback(() => {
-    const sPos = {
-      row: Math.floor(Math.random() * ROWS),
-      col: Math.floor(Math.random() * (COLS / 4))
-    };
-    const ePos = {
-      row: Math.floor(Math.random() * ROWS),
-      col: Math.floor(COLS - 1 - (Math.random() * (COLS / 4)))
-    };
+  const generateNewGame = useCallback((autoStart = false) => {
+    let sPos, ePos, finalGrid;
+    let attempts = 0;
+    const maxAttempts = 20;
 
-    const newGrid = [];
-    for (let row = 0; row < ROWS; row++) {
-      const currentRow = [];
-      for (let col = 0; col < COLS; col++) {
-        const isWall = (row !== sPos.row || col !== sPos.col) &&
-          (row !== ePos.row || col !== ePos.col) &&
-          Math.random() < 0.3;
-        currentRow.push({
-          ...createNode(row, col, sPos, ePos),
-          isWall
-        });
+    do {
+      sPos = {
+        row: Math.floor(Math.random() * ROWS),
+        col: Math.floor(Math.random() * (COLS / 4))
+      };
+      ePos = {
+        row: Math.floor(Math.random() * ROWS),
+        col: Math.floor(COLS - 1 - (Math.random() * (COLS / 4)))
+      };
+
+      const wallChance = Math.min(0.2 + (level - 1) * 0.05, 0.5);
+      const newGrid = [];
+      for (let row = 0; row < ROWS; row++) {
+        const currentRow = [];
+        for (let col = 0; col < COLS; col++) {
+          const isWall = (row !== sPos.row || col !== sPos.col) &&
+            (row !== ePos.row || col !== ePos.col) &&
+            Math.random() < wallChance;
+          currentRow.push({
+            ...createNode(row, col, sPos, ePos),
+            isWall
+          });
+        }
+        newGrid.push(currentRow);
       }
-      newGrid.push(currentRow);
-    }
 
-    const finalGrid = newGrid.map(r => r.map(node => {
-      const dist = Math.abs(node.row - sPos.row) + Math.abs(node.col - sPos.col);
-      // Reveal nodes around start AND the portal itself
-      if (dist <= visibleRadius || (node.row === ePos.row && node.col === ePos.col)) {
-        return { ...node, isRevealed: true };
-      }
-      return node;
-    }));
+      finalGrid = newGrid.map(r => r.map(node => {
+        const dist = Math.abs(node.row - sPos.row) + Math.abs(node.col - sPos.col);
+        if (dist <= VISIBLE_RADIUS || (node.row === ePos.row && node.col === ePos.col)) {
+          return { ...node, isRevealed: true };
+        }
+        return node;
+      }));
+
+      const { path } = BFS(finalGrid, finalGrid[sPos.row][sPos.col], finalGrid[ePos.row][ePos.col]);
+      if (path || attempts >= maxAttempts) break;
+      attempts++;
+    } while (true);
 
     setGrid(finalGrid);
     setStartPos(sPos);
@@ -112,9 +122,9 @@ const App = () => {
     setPlayerPos(sPos);
     setStats({ steps: 0, explored: 0 });
     setGameWon(false);
-    setGameStarted(false);
+    setGameStarted(autoStart);
     resetVisualizationOnly();
-  }, [visibleRadius]);
+  }, [level]);
 
   const walkPath = async (path) => {
     if (!path || !gameStarted) return;
@@ -151,59 +161,103 @@ const App = () => {
     resetVisualizationOnly();
     const startNode = grid[playerPos.row][playerPos.col];
     const endNode = grid[targetRow][targetCol];
-    const { path } = AStar(grid, startNode, endNode);
+    const { path } = BFS(grid, startNode, endNode);
     await walkPath(path);
   };
 
   const aiSolve = async () => {
     if (moving || gameWon || !gameStarted) return;
-    resetVisualizationOnly();
-    const startNode = grid[playerPos.row][playerPos.col];
-    const endNode = grid[endPos.row][endPos.col];
+    setMoving(true);
+
+    // 1. Prepare clean grid for search to avoid old visualization interference
+    const cleanGrid = grid.map(row => row.map(node => ({
+      ...node,
+      isVisited: false,
+      isExplored: false
+    })));
+    setGrid(cleanGrid);
+
+    // 2. Perform search
+    const startNode = cleanGrid[playerPos.row][playerPos.col];
+    const endNode = cleanGrid[endPos.row][endPos.col];
 
     let result;
-    if (algorithm === 'BFS') result = BFS(grid, startNode, endNode);
-    else if (algorithm === 'DFS') result = DFS(grid, startNode, endNode);
-    else result = AStar(grid, startNode, endNode);
-
-    if (result && result.path) {
-      await walkPath(result.path);
+    try {
+      if (algorithm === 'BFS') result = BFS(cleanGrid, startNode, endNode);
+      else result = DFS(cleanGrid, startNode, endNode);
+    } catch (err) {
+      console.error("AI Solve Error:", err);
+      setMoving(false);
+      return;
     }
+
+    if (result) {
+      // 3. Step-by-step Exploration Visualization
+      const nodes = result.visitedNodesInOrder;
+      const batchSize = Math.max(1, Math.floor(nodes.length / 30));
+
+      for (let i = 0; i < nodes.length; i += batchSize) {
+        const currentBatch = nodes.slice(i, i + batchSize);
+
+        setGrid(prevGrid => {
+          const newGrid = [...prevGrid];
+          currentBatch.forEach(node => {
+            if (newGrid[node.row] && newGrid[node.row][node.col]) {
+              newGrid[node.row] = [...newGrid[node.row]];
+              newGrid[node.row][node.col] = {
+                ...newGrid[node.row][node.col],
+                isExplored: true,
+                isRevealed: true
+              };
+            }
+          });
+          return newGrid;
+        });
+
+        setStats(s => ({ ...s, explored: Math.min(i + batchSize, nodes.length) }));
+        // Slower timeout for "wow" effect
+        await new Promise(r => setTimeout(r, 20));
+      }
+
+      // 4. Final Path Walking
+      if (result.path && result.path.length > 0) {
+        await walkPath(result.path);
+      }
+    }
+    setMoving(false);
   };
 
   const movePlayerManual = useCallback((dRow, dCol) => {
     if (moving || gameWon || showCharSelect || !gameStarted) return;
 
-    setPlayerPos(prev => {
-      const newRow = prev.row + dRow;
-      const newCol = prev.col + dCol;
+    const newRow = playerPos.row + dRow;
+    const newCol = playerPos.col + dCol;
 
-      if (newRow >= 0 && newRow < ROWS && newCol >= 0 && newCol < COLS) {
-        if (!grid[newRow][newCol].isWall) {
-          const nextPos = { row: newRow, col: newCol };
+    if (newRow >= 0 && newRow < ROWS && newCol >= 0 && newCol < COLS) {
+      const targetNode = grid[newRow][newCol];
+      if (!targetNode.isWall) {
+        setPlayerPos({ row: newRow, col: newCol });
 
-          setGrid(prevGrid => {
-            const nGrid = [...prevGrid];
-            nGrid[newRow] = [...nGrid[newRow]];
-            nGrid[newRow][newCol] = {
-              ...nGrid[newRow][newCol],
-              isVisited: true,
-              isRevealed: true
-            };
-            return nGrid;
-          });
+        setGrid(prevGrid => {
+          const nGrid = prevGrid.map(r => [...r]);
+          nGrid[newRow][newCol] = {
+            ...nGrid[newRow][newCol],
+            isVisited: true,
+            isRevealed: true
+          };
+          return nGrid;
+        });
 
-          revealCells(newRow, newCol);
-          if (nextPos.row === endPos.row && nextPos.col === endPos.col) {
-            setGameWon(true);
-          }
-          setStats(s => ({ ...s, steps: s.steps + 1 }));
-          return nextPos;
+        revealCells(newRow, newCol);
+
+        if (newRow === endPos.row && newCol === endPos.col) {
+          setGameWon(true);
         }
+
+        setStats(s => ({ ...s, steps: s.steps + 1 }));
       }
-      return prev;
-    });
-  }, [grid, moving, gameWon, showCharSelect, endPos, gameStarted, revealCells]);
+    }
+  }, [grid, moving, gameWon, showCharSelect, endPos, gameStarted, revealCells, playerPos]);
 
   const updateGuide = useCallback(() => {
     if (!showGuide || gameWon || !gameStarted || !grid.length) {
@@ -212,7 +266,7 @@ const App = () => {
     }
     const startNode = grid[playerPos.row][playerPos.col];
     const endNode = grid[endPos.row][endPos.col];
-    const { path } = AStar(grid, startNode, endNode);
+    const { path } = BFS(grid, startNode, endNode);
     setGuidePath(path || []);
   }, [showGuide, gameWon, gameStarted, grid, playerPos, endPos]);
 
@@ -336,8 +390,16 @@ const App = () => {
           </div>
 
           <div className="stat-hud-box green">
-            <span className="label">ALGORITHM</span>
+            <span className="label">ALGORITHM PROTOCOL</span>
             <span className="value">{algorithm}</span>
+            <span style={{ fontSize: '0.6rem', opacity: 0.5, display: 'block', marginTop: '0.5rem' }}>
+              {algorithm === 'BFS' ? 'Finds Shortest Path' : 'Explores Deep First'}
+            </span>
+          </div>
+
+          <div className="stat-hud-box orange">
+            <span className="label">CURRENT LEVEL</span>
+            <span className="value">{level}</span>
           </div>
 
           <div className="stat-hud-box orange">
@@ -351,11 +413,11 @@ const App = () => {
           <select value={algorithm} onChange={(e) => setAlgorithm(e.target.value)} disabled={moving}>
             <option value="BFS">BFS - Shortest Path</option>
             <option value="DFS">DFS - Deep Exploration</option>
-            <option value="A*">A* - Dynamic Intel</option>
           </select>
 
           <button className="hud-btn primary" onClick={aiSolve} disabled={moving || gameWon}>
-            <Play size={16} /> INITIALIZE AI
+            <Play size={16} className={moving ? 'spin' : ''} />
+            {moving ? 'ANALYZING...' : 'INITIALIZE AI'}
           </button>
 
           <button className={`hud-btn ${editMode ? 'active' : ''}`} onClick={() => setEditMode(!editMode)}>
@@ -415,6 +477,7 @@ const App = () => {
                 if (isPlayer) nodeClass += ' n-player';
                 if (!isRevealed && !revealAll) nodeClass += ' n-hidden';
                 if (node.isVisited && !isStart && !isEnd) nodeClass += ' n-trail';
+                if (node.isExplored && !isStart && !isEnd && !node.isVisited) nodeClass += ' n-explored';
                 if (isGuide && showGuide && !isPlayer && !isEnd) nodeClass += ' n-guide';
 
                 return (
@@ -465,8 +528,15 @@ const App = () => {
                   </div>
                 </div>
                 <div className="modal-actions">
-                  <button onClick={generateNewGame}>NEXT MISSION</button>
-                  <button className="outline" onClick={() => setShowCharSelect(true)}>MAIN MENU</button>
+                  <button onClick={() => {
+                    setLevel(l => l + 1);
+                    generateNewGame(true); // Auto start next level
+                  }}>NEXT MISSION</button>
+                  <button className="outline" onClick={() => {
+                    setLevel(1);
+                    setGameStarted(false);
+                    setShowCharSelect(true);
+                  }}>MAIN MENU</button>
                 </div>
               </div>
             </div>
@@ -483,6 +553,9 @@ const App = () => {
             </div>
             <div className="l-item">
               <div className="l-box p-trail"></div> <span>TRACE</span>
+            </div>
+            <div className="l-item">
+              <div className="l-box" style={{ background: 'var(--neon-blue)', boxShadow: '0 0 5px var(--neon-blue)', borderRadius: '50%' }}></div> <span>ANALYSIS</span>
             </div>
             <div className="l-item">
               <div className="l-box p-hidden" style={{ background: '#010409', border: '1px solid rgba(255,255,255,0.1)' }}></div> <span>HIDDEN</span>

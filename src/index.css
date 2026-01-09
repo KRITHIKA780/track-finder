@@ -147,6 +147,17 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2rem;
+  overflow-y: auto;
+  height: 100vh;
+}
+
+.game-sidebar-hud::-webkit-scrollbar {
+  width: 4px;
+}
+
+.game-sidebar-hud::-webkit-scrollbar-thumb {
+  background: var(--border-glass);
+  border-radius: 10px;
 }
 
 .hud-header {
@@ -314,13 +325,13 @@ body {
 .maze-viewport {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  /* Restored flex for centering */
   background: rgba(0, 0, 0, 0.4);
   border-radius: 2rem;
   border: 4px solid rgba(15, 23, 42, 1);
   position: relative;
   overflow: auto;
+  padding: 2rem;
 }
 
 .grid-unique {
@@ -328,6 +339,23 @@ body {
   gap: 1px;
   background: rgba(255, 255, 255, 0.03);
   padding: 2px;
+  margin: auto;
+  /* Works perfectly with flex for centering + scrolling */
+  width: max-content;
+}
+
+.spin {
+  animation: spinHUD 1s linear infinite;
+}
+
+@keyframes spinHUD {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .node-unique {
@@ -373,6 +401,30 @@ body {
   border-radius: 4px;
   opacity: 0.4;
   pointer-events: none;
+}
+
+.node-unique.n-explored::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  background: var(--neon-blue);
+  box-shadow: 0 0 8px var(--neon-blue);
+  border-radius: 50%;
+  opacity: 0.3;
+  pointer-events: none;
+  animation: pulseExplored 1s ease-out;
+}
+
+@keyframes pulseExplored {
+  from {
+    transform: scale(0);
+    opacity: 0.8;
+  }
+
+  to {
+    transform: scale(1);
+    opacity: 0.3;
+  }
 }
 
 .player-sprite {
