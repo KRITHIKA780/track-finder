@@ -123,8 +123,17 @@ const App = () => {
     setStats({ steps: 0, explored: 0 });
     setGameWon(false);
     setGameStarted(autoStart);
+    setRevealAll(false); // Reset reveal state on new game
     resetVisualizationOnly();
   }, [level]);
+
+  const triggerIntelPulse = () => {
+    if (revealAll) return;
+    setRevealAll(true);
+    setTimeout(() => {
+      setRevealAll(false);
+    }, 4000); // 4 second peek
+  };
 
   const walkPath = async (path) => {
     if (!path || !gameStarted) return;
@@ -192,31 +201,32 @@ const App = () => {
     }
 
     if (result) {
-      // 3. Step-by-step Exploration Visualization
-      const nodes = result.visitedNodesInOrder;
-      const batchSize = Math.max(1, Math.floor(nodes.length / 30));
+      // 3. Step-by-step Exploration Visualization (Skip if map is fully revealed for speed)
+      if (!revealAll) {
+        const nodes = result.visitedNodesInOrder;
+        const batchSize = Math.max(1, Math.floor(nodes.length / 30));
 
-      for (let i = 0; i < nodes.length; i += batchSize) {
-        const currentBatch = nodes.slice(i, i + batchSize);
+        for (let i = 0; i < nodes.length; i += batchSize) {
+          const currentBatch = nodes.slice(i, i + batchSize);
 
-        setGrid(prevGrid => {
-          const newGrid = [...prevGrid];
-          currentBatch.forEach(node => {
-            if (newGrid[node.row] && newGrid[node.row][node.col]) {
-              newGrid[node.row] = [...newGrid[node.row]];
-              newGrid[node.row][node.col] = {
-                ...newGrid[node.row][node.col],
-                isExplored: true,
-                isRevealed: true
-              };
-            }
+          setGrid(prevGrid => {
+            const newGrid = [...prevGrid];
+            currentBatch.forEach(node => {
+              if (newGrid[node.row] && newGrid[node.row][node.col]) {
+                newGrid[node.row] = [...newGrid[node.row]];
+                newGrid[node.row][node.col] = {
+                  ...newGrid[node.row][node.col],
+                  isExplored: true,
+                  isRevealed: true
+                };
+              }
+            });
+            return newGrid;
           });
-          return newGrid;
-        });
 
-        setStats(s => ({ ...s, explored: Math.min(i + batchSize, nodes.length) }));
-        // Slower timeout for "wow" effect
-        await new Promise(r => setTimeout(r, 20));
+          setStats(s => ({ ...s, explored: Math.min(i + batchSize, nodes.length) }));
+          await new Promise(r => setTimeout(r, 20));
+        }
       }
 
       // 4. Final Path Walking
@@ -428,9 +438,27 @@ const App = () => {
             <Info size={16} /> {showGuide ? 'HIDE SCANNER' : 'SCANNER PING'}
           </button>
 
-          <button className={`hud-btn ${revealAll ? 'active-pulse' : ''}`} onClick={() => setRevealAll(!revealAll)}>
-            <Sparkles size={16} /> {revealAll ? 'HIDE INTEL' : 'REVEAL FULL MAP'}
+          <button
+            className={`hud-btn ${revealAll ? 'active-pulse' : ''}`}
+            onClick={() => {
+              if (!gameStarted) setGameStarted(true);
+              triggerIntelPulse();
+            }}
+            disabled={revealAll}
+          >
+            <Sparkles size={16} /> {revealAll ? 'SCANNING...' : 'INTEL PULSE'}
           </button>
+
+          <div className="manual-controls-hint">
+            <label>MANUAL OVERRIDE</label>
+            <div className="key-hints">
+              <span className="key">W</span>
+              <span className="key">A</span>
+              <span className="key">S</span>
+              <span className="key">D</span>
+              <span className="key-arrows">/ ARROWS</span>
+            </div>
+          </div>
 
           <button className="hud-btn secondary" onClick={generateNewGame} disabled={moving || gameWon}>
             <Zap size={16} /> NEW SESSION
@@ -509,9 +537,17 @@ const App = () => {
                 <Rocket size={48} className="start-icon-rocket" />
                 <h2>READY FOR MISSION?</h2>
                 <p>The maze is hidden. Explore to reveal the path.</p>
-                <button className="btn-start-game" onClick={() => setGameStarted(true)}>
-                  START MISSION
-                </button>
+                <div className="start-actions">
+                  <button className="btn-start-game" onClick={() => setGameStarted(true)}>
+                    START MISSION
+                  </button>
+                  <button className="btn-start-revealed" onClick={() => {
+                    setGameStarted(true);
+                    triggerIntelPulse();
+                  }}>
+                    SCAN & START
+                  </button>
+                </div>
               </div>
             </div>
           )}
